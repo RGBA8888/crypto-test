@@ -30,9 +30,6 @@ if (int.TryParse(portValue, out var port) && port is > 0 and < 65536)
 
 var app = builder.Build();
 
-app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }))
-    .WithName("Healthz");
-
 // Configure the HTTP request pipeline.
 var swaggerEnabled =
     app.Environment.IsDevelopment() ||
@@ -66,7 +63,8 @@ if (!string.IsNullOrWhiteSpace(apiKey))
     app.Use(async (context, next) =>
     {
         var path = context.Request.Path.Value ?? string.Empty;
-        var isHealthz = path.Equals("/healthz", StringComparison.OrdinalIgnoreCase);
+        var isHealthz = path.Equals("/healthz", StringComparison.OrdinalIgnoreCase) ||
+                        path.StartsWith("/healthz/", StringComparison.OrdinalIgnoreCase);
         var isSwagger = swaggerEnabled &&
                         (path.StartsWith("/openapi", StringComparison.OrdinalIgnoreCase) ||
                          path.StartsWith("/swagger", StringComparison.OrdinalIgnoreCase));
