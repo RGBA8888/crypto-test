@@ -1,10 +1,32 @@
+using Microsoft.AspNetCore.HttpOverrides;
+using NSwag.Generation.Processors.Security;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 
 builder.Services.AddControllers();
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-builder.Services.AddOpenApi();
+builder.Services.AddOpenApiDocument(config =>
+{
+    config.Title = "TodoApi";
+    config.Version = "v1";
+
+    config.AddSecurity("ApiKey", Array.Empty<string>(), new NSwag.OpenApiSecurityScheme
+    {
+        Type = NSwag.OpenApiSecuritySchemeType.ApiKey,
+        Name = "X-API-Key",
+        In = NSwag.OpenApiSecurityApiKeyLocation.Header,
+        Description = "Static API key for this service"
+    });
+    config.OperationProcessors.Add(new AspNetCoreOperationSecurityScopeProcessor("ApiKey"));
+});
+
+// Cloud Run provides the port via the PORT env var (default is 8080).
+var portValue = Environment.GetEnvironmentVariable("PORT");
+if (int.TryParse(portValue, out var port) && port is > 0 and < 65536)
+{
+    builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
+}
 
 var app = builder.Build();
 
@@ -12,14 +34,27 @@ app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }))
     .WithName("Healthz");
 
 // Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+var swaggerEnabled =
+    app.Environment.IsDevelopment() ||
+    string.Equals(app.Configuration["SWAGGER_ENABLED"], "true", StringComparison.OrdinalIgnoreCase);
+
+if (swaggerEnabled)
 {
-    app.MapOpenApi();
-    app.UseSwaggerUi(options =>
+    app.UseOpenApi(settings => { settings.Path = "/openapi/v1.json"; });
+    app.UseSwaggerUi(settings =>
     {
-        options.DocumentPath = "/openapi/v1.json";
+        settings.Path = "/swagger";
+        settings.DocumentPath = "/openapi/v1.json";
     });
 }
+
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
+    // Cloud Run forwards from dynamic IPs; trust forwarded headers in this controlled environment.
+    KnownNetworks = { },
+    KnownProxies = { }
+});
 
 app.UseHttpsRedirection();
 
@@ -32,11 +67,11 @@ if (!string.IsNullOrWhiteSpace(apiKey))
     {
         var path = context.Request.Path.Value ?? string.Empty;
         var isHealthz = path.Equals("/healthz", StringComparison.OrdinalIgnoreCase);
-        var isDevOpenApi = app.Environment.IsDevelopment() &&
-                           (path.StartsWith("/openapi", StringComparison.OrdinalIgnoreCase) ||
-                            path.StartsWith("/swagger", StringComparison.OrdinalIgnoreCase));
+        var isSwagger = swaggerEnabled &&
+                        (path.StartsWith("/openapi", StringComparison.OrdinalIgnoreCase) ||
+                         path.StartsWith("/swagger", StringComparison.OrdinalIgnoreCase));
 
-        if (isHealthz || isDevOpenApi)
+        if (isHealthz || isSwagger)
         {
             await next();
             return;
