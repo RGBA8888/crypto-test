@@ -1,0 +1,14 @@
+**/.git
+**/.vs
+**/.vscode
+**/bin
+**/obj
+**/*.user
+**/*.suo
+**/*.pdb
+**/*.cache
+**/*.log
+**/TestResults
+**/node_modules
+**/.DS_Store
+
