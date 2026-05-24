@@ -1,11 +1,13 @@
 using Microsoft.AspNetCore.HttpOverrides;
 using NSwag.Generation.Processors.Security;
+using TodoApi.Services.ClickHouse;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 
 builder.Services.AddControllers();
+builder.Services.AddSingleton<IClickHouseHealthService, ClickHouseHealthService>();
 builder.Services.AddOpenApiDocument(config =>
 {
     config.Title = "TodoApi";
