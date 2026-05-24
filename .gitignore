@@ -67,3 +67,6 @@ AGENTS.md
 CONTEXT.md
 ROADMAP.md
 SECRETS.md
+
+# Notebooks (local-only, may contain credentials)
+notebooks/
