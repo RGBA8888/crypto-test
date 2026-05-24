@@ -2,6 +2,10 @@ name: deploy-cloud-run
 
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows: [ "publish" ]
+    types: [ completed ]
+    branches: [ main ]
 
 env:
   SERVICE_NAME: todoapi
@@ -9,6 +13,7 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     permissions:
       contents: read
     steps:
@@ -22,11 +27,20 @@ jobs:
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
 
+      - name: Resolve image tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            echo "tag=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Deploy to Cloud Run
         run: >
           gcloud run deploy "${{ env.SERVICE_NAME }}"
           --region "${{ secrets.GCP_REGION }}"
           --platform managed
           --allow-unauthenticated
-          --image "docker.io/${{ secrets.DOCKERHUB_USERNAME }}/todoapi:${{ github.sha }}"
-          --set-env-vars "ASPNETCORE_ENVIRONMENT=Production"
+          --image "docker.io/${{ secrets.DOCKERHUB_USERNAME }}/todoapi:${{ steps.tag.outputs.tag }}"
+          --set-env-vars "ASPNETCORE_ENVIRONMENT=Production,SWAGGER_ENABLED=${{ vars.SWAGGER_ENABLED || 'false' }},API_KEY=${{ secrets.API_KEY }}"
