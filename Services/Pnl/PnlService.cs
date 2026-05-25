@@ -4,7 +4,7 @@ using TodoApi.Domain.Pnl;
 
 namespace TodoApi.Services.Pnl;
 
-public sealed class PnlService(IPnlQueryRepository repository, IConfiguration configuration, ILogger<PnlService> logger) : IPnlService
+public sealed class PnlService(IPnlQueryRepository repository, ILogger<PnlService> logger) : IPnlService
 {
     public async Task<PnlResponseDto> GetWalletPnlAsync(
         string wallet,
@@ -15,19 +15,9 @@ public sealed class PnlService(IPnlQueryRepository repository, IConfiguration co
         CancellationToken ct)
     {
         var swTotal = System.Diagnostics.Stopwatch.StartNew();
-        logger.LogInformation(
-            "PnL start wallet={Wallet} from={From} to={To} scope={Scope} includeTransfers={IncludeTransfers}",
-            wallet,
-            from,
-            to,
-            scope,
-            includeTransfers);
 
         // Fetch tokens traded in range
-        var sw = System.Diagnostics.Stopwatch.StartNew();
         var tokens = await repository.GetTokensTradedInRangeAsync(wallet, from, to, ct);
-        sw.Stop();
-        logger.LogInformation("PnL tokens={TokenCount} fetched in {ElapsedMs}ms", tokens.Count, sw.ElapsedMilliseconds);
 
         if (tokens.Count == 0)
         {
@@ -45,112 +35,29 @@ public sealed class PnlService(IPnlQueryRepository repository, IConfiguration co
         }
 
         // Aggregates in range (diagnostics)
-        sw.Restart();
         var aggRows = await repository.GetTradesAggInRangeAsync(wallet, from, to, ct);
-        sw.Stop();
-        logger.LogInformation("PnL aggRows={RowCount} fetched in {ElapsedMs}ms", aggRows.Count, sw.ElapsedMilliseconds);
         var aggByToken = aggRows.ToDictionary(x => x.Token, StringComparer.Ordinal);
 
         // Deltas and holdings
-        sw.Restart();
         var deltas = await repository.GetWalletDeltasAsync(wallet, from, to, ct);
-        sw.Stop();
-        logger.LogInformation("PnL deltas={RowCount} fetched in {ElapsedMs}ms", deltas.Count, sw.ElapsedMilliseconds);
         var deltasByToken = deltas.ToDictionary(x => x.Token, StringComparer.Ordinal);
 
         // Prices
-        sw.Restart();
         var prices = await repository.GetLatestPricesAsync(tokens, to, ct);
-        sw.Stop();
-        logger.LogInformation("PnL prices={RowCount} fetched in {ElapsedMs}ms", prices.Count, sw.ElapsedMilliseconds);
         var priceByToken = prices.ToDictionary(x => x.Token, StringComparer.Ordinal);
 
         TradesUpToResult tradesResult;
         var scopeUsed = scope;
         if (scope == CostBasisScope.Warmup)
         {
-            try
-            {
-                // Trades up to 'to' to compute warmup + in-range realized/remaining basis
-                var warmupTimeoutSeconds = int.TryParse(configuration["CLICKHOUSE_WARMUP_TIMEOUT_SECONDS"], out var ts) ? ts : 10;
-                warmupTimeoutSeconds = Math.Clamp(warmupTimeoutSeconds, 1, 120);
-                using var warmupCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                warmupCts.CancelAfter(TimeSpan.FromSeconds(warmupTimeoutSeconds));
-
-                sw.Restart();
-                var warmupTask = repository.GetTradesUpToAsync(wallet, tokens, from, to, warmupCts.Token);
-                var completed = await Task.WhenAny(warmupTask, Task.Delay(TimeSpan.FromSeconds(warmupTimeoutSeconds), ct));
-                if (completed == warmupTask)
-                {
-                    tradesResult = await warmupTask;
-                }
-                else
-                {
-                    // Don't block the request thread on a potentially stuck driver read.
-                    _ = warmupTask.ContinueWith(
-                        t =>
-                        {
-                            if (t.IsFaulted)
-                            {
-                                logger.LogWarning(t.Exception, "PnL warmup background task faulted after timeout");
-                            }
-                            else if (t.IsCanceled)
-                            {
-                                logger.LogInformation("PnL warmup background task canceled after timeout");
-                            }
-                            else
-                            {
-                                logger.LogInformation("PnL warmup background task finished after timeout");
-                            }
-                        },
-                        CancellationToken.None,
-                        TaskContinuationOptions.ExecuteSynchronously,
-                        TaskScheduler.Default);
-
-                    throw new TimeoutException($"Warmup trades query exceeded {warmupTimeoutSeconds}s");
-                }
-                sw.Stop();
-                logger.LogInformation(
-                    "PnL warmup trades={TradeCount} fetched in {ElapsedMs}ms (truncated={Truncated})",
-                    tradesResult.Trades.Count,
-                    sw.ElapsedMilliseconds,
-                    tradesResult.IsTruncated);
-            }
-            catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
-            {
-                // Warmup can be expensive or flaky in some environments; keep API usable by falling back.
-                logger.LogWarning(ex, "PnL warmup fetch timed out/canceled; falling back to range-only trades");
-                scopeUsed = CostBasisScope.RangeOnly;
-                sw.Restart();
-                tradesResult = await repository.GetTradesInRangeAsync(wallet, tokens, from, to, ct);
-                sw.Stop();
-                logger.LogInformation(
-                    "PnL fallback range trades={TradeCount} fetched in {ElapsedMs}ms (truncated={Truncated})",
-                    tradesResult.Trades.Count,
-                    sw.ElapsedMilliseconds,
-                    tradesResult.IsTruncated);
-            }
-            catch (Exception ex) when (!ct.IsCancellationRequested)
-            {
-                logger.LogWarning(ex, "PnL warmup fetch failed; falling back to range-only trades");
-                scopeUsed = CostBasisScope.RangeOnly;
-                sw.Restart();
-                tradesResult = await repository.GetTradesInRangeAsync(wallet, tokens, from, to, ct);
-                sw.Stop();
-                logger.LogInformation(
-                    "PnL fallback range trades={TradeCount} fetched in {ElapsedMs}ms (truncated={Truncated})",
-                    tradesResult.Trades.Count,
-                    sw.ElapsedMilliseconds,
-                    tradesResult.IsTruncated);
-            }
+            // Trades up to 'to' to compute warmup + in-range realized/remaining basis.
+            // Repository already applies conservative limits and warmup window bounds.
+            tradesResult = await repository.GetTradesUpToAsync(wallet, tokens, from, to, ct);
         }
         else
         {
             // Range-only mode: do not scan wallet history.
-            sw.Restart();
             tradesResult = await repository.GetTradesInRangeAsync(wallet, tokens, from, to, ct);
-            sw.Stop();
-            logger.LogInformation("PnL range trades={TradeCount} fetched in {ElapsedMs}ms (truncated={Truncated})", tradesResult.Trades.Count, sw.ElapsedMilliseconds, tradesResult.IsTruncated);
         }
 
         if (tradesResult.IsTruncated)
@@ -247,7 +154,13 @@ public sealed class PnlService(IPnlQueryRepository repository, IConfiguration co
         }
 
         swTotal.Stop();
-        logger.LogInformation("PnL done wallet={Wallet} tokens={TokenCount} rows={RowCount} in {ElapsedMs}ms", wallet, tokens.Count, rows.Count, swTotal.ElapsedMilliseconds);
+        logger.LogInformation(
+            "PnL wallet={Wallet} scope={ScopeUsed} tokens={TokenCount} rows={RowCount} in {ElapsedMs}ms",
+            wallet,
+            scopeUsed,
+            tokens.Count,
+            rows.Count,
+            swTotal.ElapsedMilliseconds);
         return new PnlResponseDto(meta, rows);
     }
 }

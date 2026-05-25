@@ -5,7 +5,7 @@ using TodoApi.Services.ClickHouse;
 
 namespace TodoApi.Data.Pnl;
 
-public sealed class PnlQueryRepository(IConfiguration configuration, ILogger<PnlQueryRepository> logger) : IPnlQueryRepository
+public sealed class PnlQueryRepository(IConfiguration configuration) : IPnlQueryRepository
 {
     private ClickHouseConnection CreateConnection()
     {
@@ -48,8 +48,6 @@ public sealed class PnlQueryRepository(IConfiguration configuration, ILogger<Pnl
             : 60;
     }
 
-    private static long ElapsedMs(System.Diagnostics.Stopwatch sw) => sw.ElapsedMilliseconds;
-
     public async Task<IReadOnlyList<string>> GetTokensTradedInRangeAsync(string wallet, DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
     {
         const string sql = """
@@ -61,22 +59,12 @@ public sealed class PnlQueryRepository(IConfiguration configuration, ILogger<Pnl
                            """;
 
         await using var conn = CreateConnection();
-        var sw = System.Diagnostics.Stopwatch.StartNew();
         var rows = await conn.QueryAsync<string>(new CommandDefinition(
             sql,
             new { wallet, from = from.UtcDateTime, to = to.UtcDateTime },
             cancellationToken: ct,
             commandTimeout: GetCommandTimeoutSeconds()));
-        sw.Stop();
-        var list = rows.AsList();
-        logger.LogInformation(
-            "CH GetTokensTradedInRange wallet={Wallet} from={From} to={To} -> {Count} tokens in {ElapsedMs}ms",
-            wallet,
-            from,
-            to,
-            list.Count,
-            ElapsedMs(sw));
-        return list;
+        return rows.AsList();
     }
 
     public async Task<TradesUpToResult> GetTradesUpToAsync(string wallet, IReadOnlyList<string> tokens, DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
@@ -121,13 +109,11 @@ public sealed class PnlQueryRepository(IConfiguration configuration, ILogger<Pnl
         var cursorTime = warmupFrom;
         var cursorTx = "";
 
-        var swTotal = System.Diagnostics.Stopwatch.StartNew();
         while (all.Count < limit)
         {
             var remaining = limit - all.Count;
             var take = Math.Min(pageSize, remaining);
 
-            var swPage = System.Diagnostics.Stopwatch.StartNew();
             var page = (await conn.QueryAsync<TradeRow>(new CommandDefinition(
                 sql,
                 new
@@ -142,21 +128,9 @@ public sealed class PnlQueryRepository(IConfiguration configuration, ILogger<Pnl
                 },
                 cancellationToken: ct,
                 commandTimeout: GetCommandTimeoutSeconds()))).AsList();
-            swPage.Stop();
 
             if (page.Count == 0)
             {
-                swTotal.Stop();
-                logger.LogInformation(
-                    "CH GetTradesUpTo wallet={Wallet} warmupFrom={WarmupFrom} to={To} tokens={TokenCount} -> {TradeCount} trades, truncated={Truncated}, limit={Limit} in {ElapsedMs}ms",
-                    wallet,
-                    warmupFrom,
-                    to,
-                    tokens.Count,
-                    all.Count,
-                    false,
-                    limit,
-                    ElapsedMs(swTotal));
                 return new TradesUpToResult(all, false, limit);
             }
 
@@ -169,38 +143,10 @@ public sealed class PnlQueryRepository(IConfiguration configuration, ILogger<Pnl
             // Safety: if tx_hash is empty, break to avoid infinite loop (should not happen in this dataset).
             if (page.Count < take)
             {
-                swTotal.Stop();
-                logger.LogInformation(
-                    "CH GetTradesUpTo wallet={Wallet} warmupFrom={WarmupFrom} to={To} tokens={TokenCount} -> {TradeCount} trades, truncated={Truncated}, limit={Limit} in {ElapsedMs}ms",
-                    wallet,
-                    warmupFrom,
-                    to,
-                    tokens.Count,
-                    all.Count,
-                    false,
-                    limit,
-                    ElapsedMs(swTotal));
                 return new TradesUpToResult(all, false, limit);
             }
-
-            logger.LogDebug(
-                "CH GetTradesUpTo page wallet={Wallet} -> +{PageCount} trades (total={Total}) in {ElapsedMs}ms",
-                wallet,
-                page.Count,
-                all.Count,
-                ElapsedMs(swPage));
         }
 
-        swTotal.Stop();
-        logger.LogWarning(
-            "CH GetTradesUpTo wallet={Wallet} warmupFrom={WarmupFrom} to={To} tokens={TokenCount} -> hit limit {Limit} (returned {TradeCount}) in {ElapsedMs}ms",
-            wallet,
-            warmupFrom,
-            to,
-            tokens.Count,
-            limit,
-            all.Count,
-            ElapsedMs(swTotal));
         return new TradesUpToResult(all, true, limit);
     }
 
@@ -236,7 +182,6 @@ public sealed class PnlQueryRepository(IConfiguration configuration, ILogger<Pnl
         var cursorTime = from.UtcDateTime;
         var cursorTx = "";
 
-        var swTotal = System.Diagnostics.Stopwatch.StartNew();
         while (all.Count < limit)
         {
             var remaining = limit - all.Count;
@@ -259,17 +204,6 @@ public sealed class PnlQueryRepository(IConfiguration configuration, ILogger<Pnl
 
             if (page.Count == 0)
             {
-                swTotal.Stop();
-                logger.LogInformation(
-                    "CH GetTradesInRange wallet={Wallet} from={From} to={To} tokens={TokenCount} -> {TradeCount} trades, truncated={Truncated}, limit={Limit} in {ElapsedMs}ms",
-                    wallet,
-                    from,
-                    to,
-                    tokens.Count,
-                    all.Count,
-                    false,
-                    limit,
-                    ElapsedMs(swTotal));
                 return new TradesUpToResult(all, false, limit);
             }
 
@@ -281,31 +215,10 @@ public sealed class PnlQueryRepository(IConfiguration configuration, ILogger<Pnl
 
             if (page.Count < take)
             {
-                swTotal.Stop();
-                logger.LogInformation(
-                    "CH GetTradesInRange wallet={Wallet} from={From} to={To} tokens={TokenCount} -> {TradeCount} trades, truncated={Truncated}, limit={Limit} in {ElapsedMs}ms",
-                    wallet,
-                    from,
-                    to,
-                    tokens.Count,
-                    all.Count,
-                    false,
-                    limit,
-                    ElapsedMs(swTotal));
                 return new TradesUpToResult(all, false, limit);
             }
         }
 
-        swTotal.Stop();
-        logger.LogWarning(
-            "CH GetTradesInRange wallet={Wallet} from={From} to={To} tokens={TokenCount} -> hit limit {Limit} (returned {TradeCount}) in {ElapsedMs}ms",
-            wallet,
-            from,
-            to,
-            tokens.Count,
-            limit,
-            all.Count,
-            ElapsedMs(swTotal));
         return new TradesUpToResult(all, true, limit);
     }
 
@@ -328,22 +241,12 @@ public sealed class PnlQueryRepository(IConfiguration configuration, ILogger<Pnl
                            """;
 
         await using var conn = CreateConnection();
-        var sw = System.Diagnostics.Stopwatch.StartNew();
         var rows = await conn.QueryAsync<TokenTradesAggRow>(new CommandDefinition(
             sql,
             new { wallet, from = from.UtcDateTime, to = to.UtcDateTime },
             cancellationToken: ct,
             commandTimeout: GetCommandTimeoutSeconds()));
-        sw.Stop();
-        var list = rows.AsList();
-        logger.LogInformation(
-            "CH GetTradesAggInRange wallet={Wallet} from={From} to={To} -> {Count} rows in {ElapsedMs}ms",
-            wallet,
-            from,
-            to,
-            list.Count,
-            ElapsedMs(sw));
-        return list;
+        return rows.AsList();
     }
 
     public async Task<IReadOnlyList<TokenDeltasRow>> GetWalletDeltasAsync(string wallet, DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
@@ -361,22 +264,12 @@ public sealed class PnlQueryRepository(IConfiguration configuration, ILogger<Pnl
                            """;
 
         await using var conn = CreateConnection();
-        var sw = System.Diagnostics.Stopwatch.StartNew();
         var rows = await conn.QueryAsync<TokenDeltasRow>(new CommandDefinition(
             sql,
             new { wallet, from = from.UtcDateTime, to = to.UtcDateTime },
             cancellationToken: ct,
             commandTimeout: GetCommandTimeoutSeconds()));
-        sw.Stop();
-        var list = rows.AsList();
-        logger.LogInformation(
-            "CH GetWalletDeltas wallet={Wallet} from={From} to={To} -> {Count} rows in {ElapsedMs}ms",
-            wallet,
-            from,
-            to,
-            list.Count,
-            ElapsedMs(sw));
-        return list;
+        return rows.AsList();
     }
 
     public async Task<IReadOnlyList<TokenPriceRow>> GetLatestPricesAsync(IReadOnlyList<string> tokens, DateTimeOffset to, CancellationToken ct)
@@ -401,20 +294,11 @@ public sealed class PnlQueryRepository(IConfiguration configuration, ILogger<Pnl
                            """;
 
         await using var conn = CreateConnection();
-        var sw = System.Diagnostics.Stopwatch.StartNew();
         var rows = await conn.QueryAsync<TokenPriceRow>(new CommandDefinition(
             sql,
             new { tokens, to = to.UtcDateTime },
             cancellationToken: ct,
             commandTimeout: GetCommandTimeoutSeconds()));
-        sw.Stop();
-        var list = rows.AsList();
-        logger.LogInformation(
-            "CH GetLatestPrices to={To} tokens={TokenCount} -> {Count} rows in {ElapsedMs}ms",
-            to,
-            tokens.Count,
-            list.Count,
-            ElapsedMs(sw));
-        return list;
+        return rows.AsList();
     }
 }

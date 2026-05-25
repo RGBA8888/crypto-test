@@ -39,13 +39,6 @@ if (int.TryParse(portValue, out var port) && port is > 0 and < 65536)
 
 var app = builder.Build();
 
-// CLI smoke modes (no HTTP). Useful when localhost networking is restricted.
-var smokeExitCode = await ClickHouseSmoke.RunAsync(app.Services, args);
-if (smokeExitCode != -1)
-{
-    Environment.Exit(smokeExitCode);
-}
-
 // Configure the HTTP request pipeline.
 var swaggerEnabled =
     app.Environment.IsDevelopment() ||
@@ -61,17 +54,15 @@ if (swaggerEnabled)
     });
 }
 
-// Request/response telemetry (minimal, structured).
+// Request/response telemetry: always set trace header; log only on errors.
 app.Use(async (context, next) =>
 {
     var logger = context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("HttpTelemetry");
-
     var startedAt = DateTimeOffset.UtcNow;
     var sw = System.Diagnostics.Stopwatch.StartNew();
+
     context.Response.OnStarting(() =>
     {
-        // Expose trace id to clients for log correlation.
-        // Must be done before response starts; otherwise Kestrel throws.
         context.Response.Headers["X-Trace-Id"] = context.TraceIdentifier;
         context.Response.Headers["X-Started-At-Utc"] = startedAt.ToString("O");
         return Task.CompletedTask;
@@ -81,14 +72,18 @@ app.Use(async (context, next) =>
     {
         await next();
         sw.Stop();
-        logger.LogInformation(
-            "HTTP {Method} {Path}{Query} -> {StatusCode} in {ElapsedMs}ms (trace={TraceId})",
-            context.Request.Method,
-            context.Request.Path.Value,
-            context.Request.QueryString.Value,
-            context.Response.StatusCode,
-            sw.ElapsedMilliseconds,
-            context.TraceIdentifier);
+
+        if (context.Response.StatusCode >= 500)
+        {
+            logger.LogWarning(
+                "HTTP {Method} {Path}{Query} -> {StatusCode} in {ElapsedMs}ms (trace={TraceId})",
+                context.Request.Method,
+                context.Request.Path.Value,
+                context.Request.QueryString.Value,
+                context.Response.StatusCode,
+                sw.ElapsedMilliseconds,
+                context.TraceIdentifier);
+        }
     }
     catch (Exception ex)
     {
@@ -109,11 +104,14 @@ app.UseForwardedHeaders(new ForwardedHeadersOptions
 {
     ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
     // Cloud Run forwards from dynamic IPs; trust forwarded headers in this controlled environment.
-    KnownNetworks = { },
+    KnownIPNetworks = { },
     KnownProxies = { }
 });
-
-app.UseHttpsRedirection();
+// Cloud Run terminates TLS at the frontend; HTTPS redirection isn't required here.
+if (app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 
 // Temporary API-key guard for public deployments (Cloud Run).
 // Exemptions: /healthz and swagger/openapi endpoints in development.
