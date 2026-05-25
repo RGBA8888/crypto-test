@@ -54,6 +54,17 @@ if (swaggerEnabled)
     });
 }
 
+// Cloud Run (Google Frontend) can behave inconsistently for /healthz vs /healthz/.
+// Normalize /healthz -> /healthz/ so Swagger "Try it out" always hits a working path.
+app.Use((context, next) =>
+{
+    if (context.Request.Path.Equals("/healthz", StringComparison.OrdinalIgnoreCase))
+    {
+        context.Request.Path = "/healthz/";
+    }
+    return next();
+});
+
 // Request/response telemetry: always set trace header; log only on errors.
 app.Use(async (context, next) =>
 {

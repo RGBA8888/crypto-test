@@ -39,6 +39,8 @@ When Swagger is enabled, OpenAPI is served at:
 - `GET /openapi/v1.json`
 - Swagger UI: `/swagger`
 
+The easiest way to test the API end-to-end is to open Swagger UI, set the `X-API-Key` value, and execute requests directly from the browser.
+
 ## Local run
 
 Run with the .NET SDK:
@@ -84,6 +86,10 @@ curl http://localhost:8080/healthz/
 - Source code is hosted on GitHub: [RGBA8888/crypto-test](https://github.com/RGBA8888/crypto-test)
 - GitHub Actions builds and tests the service, then builds a Docker image and pushes it to Docker Hub.
 - After publish, GitHub Actions deploys the image to Google Cloud Run.
+
+Docker Hub repository:
+
+- https://hub.docker.com/repository/docker/dysoncucumber/crypto/general
 
 Current Cloud Run service URL:
 

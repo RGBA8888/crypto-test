@@ -5,6 +5,6 @@ namespace Crypto.Controllers;
 [ApiController]
 public class HealthController : ControllerBase
 {
-    [HttpGet("/healthz")]
+    [HttpGet("/healthz/")]
     public IActionResult Healthz() => Ok(new { status = "ok" });
 }

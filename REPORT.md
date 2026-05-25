@@ -6,6 +6,15 @@ This project implements a small, standalone HTTP API (C# / ASP.NET) that queries
 
 Primary goal: provide a clean API surface and a query layer that can evolve without turning into one large controller method, while remaining safe (parameterized SQL) and reasonably efficient for time-bounded requests.
 
+This is a **medium-hard task** mainly due to PnL semantics, not due to HTTP or ClickHouse connectivity. The API must avoid confusing:
+
+```text
+trade intent            ≠ token transfers
+trade PnL               ≠ wallet balance delta
+realized PnL            ≠ mark-to-market unrealized PnL
+DeFi inflow/outflow     ≠ all movement into/out of wallet
+```
+
 ## API
 
 ### Endpoints
@@ -53,15 +62,22 @@ Minimum required fields per token (included):
 
 ## Data model and query strategy (ClickHouse)
 
-The service relies on three ClickHouse tables (in `solanav1`):
+The service relies on three ClickHouse tables (in `solanav1`). The schema already provides a very useful abstraction: **`ui_trades`**. Without it, the service would need to reconstruct swap intent from lower-level raw swap records and transfers.
 
 - `ui_trades`
   - Preferred for realized PnL/cost basis due to explicit `side` and chronological trade rows.
+  - Important columns used here: `block_time`, `user_wallet`, `token`, `side`, `amount`, `volume_usd`, `tx_hash`, `compound_fees`.
 - `wallet_1m_deltas`
   - Used for net balance delta and end-of-range holdings (physical changes, includes transfers).
   - Uses `argMaxMerge(close_holdings)` for close holdings.
 - `token_prices_1m`
   - Used for mark price at or before `to` for unrealized PnL.
+
+### How to think about the tables
+
+- `ui_trades` is a **user-facing, per-token trade view**: one on-chain swap produces *two* token-centric rows (a `Buy` for the received token and a `Sell` for the spent token). This is perfect for per-token PnL, but means you should not interpret “sum of all volume_usd across tokens” as “total wallet swap volume” without considering double counting.
+- `wallet_1m_deltas` is a **minute-level physical holdings table**. It captures all movement in/out of holdings (including non-trade transfers) via `delta_balance`. It is useful as a validation/diagnostic signal and as a source for end holdings.
+- `token_prices_1m` provides the **mark price**. For unrealized PnL you must use the latest available price at or before `to`, not an average over the range.
 
 ### High-level flow
 
@@ -78,6 +94,70 @@ The service relies on three ClickHouse tables (in `solanav1`):
    - Sells realize PnL vs current WAC.
 5. Compute unrealized PnL:
    - `closeHoldings * latestPriceUsd - remainingCostBasisUsd`
+
+### Example SQL (as implemented)
+
+Token list for the wallet in range:
+
+```sql
+SELECT DISTINCT token
+FROM solanav1.ui_trades
+WHERE user_wallet = @wallet
+  AND block_time >= @from
+  AND block_time <  @to
+```
+
+Per-token aggregates in range (diagnostics):
+
+```sql
+SELECT
+  token AS Token,
+  count() AS TradeCount,
+  sumIf(volume_usd, side = 'Buy')  AS TotalBuyUsd,
+  sumIf(volume_usd, side = 'Sell') AS TotalSellUsd,
+  sumIf(amount, side = 'Buy')      AS BuyAmount,
+  sumIf(amount, side = 'Sell')     AS SellAmount,
+  sum(volume_usd * compound_fees)  AS EstimatedCompoundFeesUsd
+FROM solanav1.ui_trades
+WHERE user_wallet = @wallet
+  AND block_time >= @from
+  AND block_time <  @to
+GROUP BY token
+```
+
+Wallet deltas and end holdings:
+
+```sql
+SELECT
+  token AS Token,
+  sum(delta_balance) AS NetBalanceDelta,
+  argMaxMerge(close_holdings) AS CloseHoldings
+FROM solanav1.wallet_1m_deltas
+WHERE user_wallet = @wallet
+  AND minute >= toDateTime(@from)
+  AND minute <  toDateTime(@to)
+GROUP BY token
+```
+
+Latest price at or before `to`:
+
+```sql
+SELECT
+  token AS Token,
+  argMax(price, minute) AS LatestPriceUsd
+FROM
+(
+  SELECT
+    mint AS token,
+    minute,
+    argMaxMerge(close) AS price
+  FROM solanav1.token_prices_1m
+  WHERE mint IN @tokens
+    AND minute <= toDateTime(@to)
+  GROUP BY token, minute
+)
+GROUP BY token
+```
 
 ### Why WAC (Weighted Average Cost)
 
@@ -154,6 +234,13 @@ The service always returns:
 
 and logs only failures (5xx / exceptions) by default to reduce noise, while preserving debuggability in Cloud Run logs.
 
+### Health check path note (Cloud Run)
+
+In practice, Google Frontend / Cloud Run can behave inconsistently for `/healthz` vs `/healthz/`. To keep Swagger “Try it out” reliable and keep probes simple:
+
+- The controller route is exposed as `/healthz/`.
+- The middleware normalizes `/healthz` → `/healthz/`.
+
 ## Scalability considerations
 
 This solution is designed for time-bounded interactive queries:
@@ -179,3 +266,6 @@ Current Cloud Run URL:
 
 - https://crypto-92654428298.europe-west1.run.app
 
+Docker Hub repository:
+
+- https://hub.docker.com/repository/docker/dysoncucumber/crypto/general
