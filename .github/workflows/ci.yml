@@ -17,13 +17,13 @@ jobs:
           global-json-file: global.json
 
       - name: Restore
-        run: dotnet restore ./TodoApi.csproj
+        run: dotnet restore ./Crypto.csproj
 
       - name: Build
-        run: dotnet build ./TodoApi.csproj -c Release --no-restore
+        run: dotnet build ./Crypto.csproj -c Release --no-restore
 
       - name: Test
-        run: dotnet test ./TodoApi.csproj -c Release --no-build
+        run: dotnet test ./Crypto.csproj -c Release --no-build
 
   docker-amd64-build:
     runs-on: ubuntu-latest
@@ -40,4 +40,4 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64
           push: false
-          tags: local/todoapi:ci
+          tags: local/crypto:ci

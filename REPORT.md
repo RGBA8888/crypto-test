@@ -15,6 +15,8 @@ realized PnL            ≠ mark-to-market unrealized PnL
 DeFi inflow/outflow     ≠ all movement into/out of wallet
 ```
 
+The project deliberately returns diagnostic fields (buy/sell totals, holdings, deltas, and trace id) so consumers can reason about the quality of a computed PnL number instead of treating it as absolute truth.
+
 ## API
 
 ### Endpoints
@@ -94,6 +96,99 @@ The service relies on three ClickHouse tables (in `solanav1`). The schema alread
    - Sells realize PnL vs current WAC.
 5. Compute unrealized PnL:
    - `closeHoldings * latestPriceUsd - remainingCostBasisUsd`
+
+## PnL semantics (what the numbers mean)
+
+### Realized PnL
+
+**Realized PnL** is profit/loss that becomes final when a position is reduced (a `Sell` happens). It requires a **cost basis method**. A naive formula like:
+
+```text
+total_sell_usd - total_buy_usd
+```
+
+is *not* realized PnL; it is net cash flow over the range.
+
+This service computes realized PnL by processing `ui_trades` rows **chronologically** and applying a cost-basis method.
+
+### Unrealized PnL
+
+**Unrealized PnL** is mark-to-market PnL of the remaining position at the end of the range:
+
+```text
+unrealized_pnl_usd = close_holdings * latest_price_usd - remaining_cost_basis_usd
+```
+
+This requires:
+
+- `close_holdings` (from `wallet_1m_deltas`, i.e. physical holdings)
+- `latest_price_usd` (from `token_prices_1m` at or before `to`)
+- `remaining_cost_basis_usd` (from trade-derived cost basis)
+
+Because holdings are physical but cost basis is trade-derived, unrealized PnL can be misleading when the wallet receives/sends tokens outside of DEX trades (airdrops, transfers, bridges, etc.).
+
+## Cost basis method: WAC vs FIFO/LIFO
+
+This service uses **Weighted Average Cost (WAC)** because it is a good compromise for a small query API:
+
+- Simple to implement correctly with an ordered trade stream (`ui_trades`).
+- Stable and easy to explain.
+- Cheap to compute in-memory after retrieving the relevant trade rows.
+
+When FIFO/LIFO is worth it:
+
+- If you need more precise tax/lot accounting semantics.
+- If you want to match an external accounting system that expects FIFO (most common) or LIFO.
+
+What FIFO/LIFO adds in complexity:
+
+- You must keep a queue/stack of lots, handle partial lot closes, and be careful with floating point/precision.
+- You typically need higher-fidelity handling of fees and multi-hop swaps.
+- Warmup becomes more expensive because lot accounting is path-dependent and cannot be summarized as easily as WAC.
+
+For this task, WAC provides a defensible realized/unrealized split and demonstrates correct chronological processing without turning the project into a full accounting engine.
+
+## Warmup (why it exists, what it does)
+
+The API asks for PnL over `[from, to)`, but realized PnL inside the range depends on the wallet's **opening position** (cost basis) at `from`.
+
+Example:
+
+- Before `from`: wallet bought 100 TOKEN
+- In range: wallet sells 50 TOKEN
+
+If we only scan trades inside the range, we see a sell without prior buys and cannot compute the correct realized PnL.
+
+To address this, the `Warmup` scope attempts to fetch a bounded trade history prior to `from` (up to `CLICKHOUSE_WARMUP_MAX_DAYS`, capped by `CLICKHOUSE_TRADES_UP_TO_LIMIT`) so the in-range sells can be priced against an approximate opening cost basis.
+
+Tradeoff:
+
+- More correct cost basis for active wallets with recent history
+- Potentially heavier queries for very high-activity wallets (hence the hard caps and the `RangeOnly` fast path)
+
+## Fees and slippage
+
+The dataset includes `compound_fees`. However, it is not always safe to automatically apply a fee model unless you are certain whether fees are already embedded in `volume_usd` / `price_usd`.
+
+This service:
+
+- Uses `volume_usd` from `ui_trades` as the primary USD notional for cost basis and realized proceeds.
+- Exposes `EstimatedCompoundFeesUsd = sum(volume_usd * compound_fees)` as a **diagnostic** signal in the response.
+- Does not model slippage separately; slippage is assumed to already be reflected in the executed trade price/volume fields.
+
+## Transfers and balance deltas (why we return both)
+
+Trade-derived token movement in range can be estimated as:
+
+```text
+trade_net_delta = buy_amount - sell_amount
+```
+
+Physical token movement in range comes from:
+
+- `wallet_1m_deltas.delta_balance` aggregated over the range (returned as `netBalanceDelta`)
+
+If `netBalanceDelta` differs from `trade_net_delta`, the wallet likely had non-trade transfers in/out (or other non-DEX movements). The response includes a diagnostic flag `externalTransferSuspected` for this reason.
 
 ### Example SQL (as implemented)
 
@@ -240,6 +335,18 @@ In practice, Google Frontend / Cloud Run can behave inconsistently for `/healthz
 
 - The controller route is exposed as `/healthz/`.
 - The middleware normalizes `/healthz` → `/healthz/`.
+
+## Why multiple ClickHouse queries (instead of one big query)
+
+The implementation uses multiple focused queries because it keeps the system explainable and performant:
+
+- Token discovery (`DISTINCT token`) is a small selective query.
+- Aggregates in range (`GROUP BY token`) are efficient in ClickHouse and produce small result sets.
+- Deltas and end holdings are read from the pre-aggregated minute table.
+- Latest prices are fetched in batch for the involved tokens only.
+- Trade rows for cost basis are fetched only when needed, with conservative caps.
+
+This avoids shipping large raw datasets to the API process when a smaller aggregated query would do, while still allowing correct chronological accounting when necessary.
 
 ## Scalability considerations
 
