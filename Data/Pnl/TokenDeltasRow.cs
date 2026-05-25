@@ -1,7 +1,8 @@
 namespace TodoApi.Data.Pnl;
 
-public sealed record TokenDeltasRow(
-    string Token,
-    decimal NetBalanceDelta,
-    decimal? CloseHoldings);
-
+public sealed class TokenDeltasRow
+{
+    public string Token { get; set; } = "";
+    public double NetBalanceDelta { get; set; }
+    public double? CloseHoldings { get; set; }
+}

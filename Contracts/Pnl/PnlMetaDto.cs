@@ -6,5 +6,7 @@ public sealed record PnlMetaDto(
     DateTimeOffset To,
     string CostBasisMethod,
     string CostBasisScope,
-    bool IncludeTransfers);
-
+    bool IncludeTransfers,
+    int TradesUpToLimit,
+    bool TradesUpToTruncated,
+    string FeesModel);

@@ -5,5 +5,5 @@ public sealed record PnlDiagnosticsDto(
     decimal SellAmount,
     decimal TradeNetDelta,
     bool ExternalTransferSuspected,
-    decimal RemainingCostBasisUsd);
-
+    decimal RemainingCostBasisUsd,
+    decimal? EstimatedCompoundFeesUsd);

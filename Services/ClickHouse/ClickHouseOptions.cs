@@ -8,7 +8,8 @@ public sealed record ClickHouseOptions
     public int Port { get; init; } = 8123;
     public string Username { get; init; } = "";
     public string Password { get; init; } = "";
-    public string Database { get; init; } = "__default__";
+    // The public dataset tables live in the `solanav1` database.
+    public string Database { get; init; } = "solanav1";
     public string Protocol { get; init; } = "http";
 
     public int TimeoutSeconds { get; init; } = 10;

@@ -58,6 +58,47 @@ if (swaggerEnabled)
     });
 }
 
+// Request/response telemetry (minimal, structured).
+app.Use(async (context, next) =>
+{
+    var logger = context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("HttpTelemetry");
+
+    var startedAt = DateTimeOffset.UtcNow;
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    try
+    {
+        await next();
+        sw.Stop();
+        logger.LogInformation(
+            "HTTP {Method} {Path}{Query} -> {StatusCode} in {ElapsedMs}ms (trace={TraceId})",
+            context.Request.Method,
+            context.Request.Path.Value,
+            context.Request.QueryString.Value,
+            context.Response.StatusCode,
+            sw.ElapsedMilliseconds,
+            context.TraceIdentifier);
+    }
+    catch (Exception ex)
+    {
+        sw.Stop();
+        logger.LogError(
+            ex,
+            "HTTP {Method} {Path}{Query} -> exception in {ElapsedMs}ms (trace={TraceId})",
+            context.Request.Method,
+            context.Request.Path.Value,
+            context.Request.QueryString.Value,
+            sw.ElapsedMilliseconds,
+            context.TraceIdentifier);
+        throw;
+    }
+    finally
+    {
+        // Expose trace id to clients for log correlation.
+        context.Response.Headers["X-Trace-Id"] = context.TraceIdentifier;
+        context.Response.Headers["X-Started-At-Utc"] = startedAt.ToString("O");
+    }
+});
+
 app.UseForwardedHeaders(new ForwardedHeadersOptions
 {
     ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
