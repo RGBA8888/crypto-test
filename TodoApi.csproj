@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <PackageReference Include="ClickHouse.Driver" Version="1.2.0" />
+    <PackageReference Include="Dapper" Version="2.1.66" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.8" />
     <PackageReference Include="Microsoft.OpenApi" Version="2.0.0" />
     <PackageReference Include="NSwag.AspNetCore" Version="14.7.1" />

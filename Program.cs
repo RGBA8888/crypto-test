@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.HttpOverrides;
 using NSwag.Generation.Processors.Security;
 using TodoApi.Services.ClickHouse;
+using TodoApi.Data.Pnl;
+using TodoApi.Services.Pnl;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -8,6 +10,8 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
 builder.Services.AddSingleton<IClickHouseHealthService, ClickHouseHealthService>();
+builder.Services.AddSingleton<IPnlQueryRepository, PnlQueryRepository>();
+builder.Services.AddSingleton<IPnlService, PnlService>();
 builder.Services.AddOpenApiDocument(config =>
 {
     config.Title = "TodoApi";
@@ -31,6 +35,13 @@ if (int.TryParse(portValue, out var port) && port is > 0 and < 65536)
 }
 
 var app = builder.Build();
+
+// CLI smoke modes (no HTTP). Useful when localhost networking is restricted.
+var smokeExitCode = await ClickHouseSmoke.RunAsync(app.Services, args);
+if (smokeExitCode != -1)
+{
+    Environment.Exit(smokeExitCode);
+}
 
 // Configure the HTTP request pipeline.
 var swaggerEnabled =

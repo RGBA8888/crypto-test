@@ -1,0 +1,10 @@
+using TodoApi.Contracts.Pnl;
+using TodoApi.Domain.Pnl;
+
+namespace TodoApi.Services.Pnl;
+
+public interface IPnlService
+{
+    Task<PnlResponseDto> GetWalletPnlAsync(string wallet, DateTimeOffset from, DateTimeOffset to, CostBasisScope scope, bool includeTransfers, CancellationToken ct);
+}
+
