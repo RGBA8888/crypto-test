@@ -65,6 +65,15 @@ app.Use(async (context, next) =>
 
     var startedAt = DateTimeOffset.UtcNow;
     var sw = System.Diagnostics.Stopwatch.StartNew();
+    context.Response.OnStarting(() =>
+    {
+        // Expose trace id to clients for log correlation.
+        // Must be done before response starts; otherwise Kestrel throws.
+        context.Response.Headers["X-Trace-Id"] = context.TraceIdentifier;
+        context.Response.Headers["X-Started-At-Utc"] = startedAt.ToString("O");
+        return Task.CompletedTask;
+    });
+
     try
     {
         await next();
@@ -90,12 +99,6 @@ app.Use(async (context, next) =>
             sw.ElapsedMilliseconds,
             context.TraceIdentifier);
         throw;
-    }
-    finally
-    {
-        // Expose trace id to clients for log correlation.
-        context.Response.Headers["X-Trace-Id"] = context.TraceIdentifier;
-        context.Response.Headers["X-Started-At-Utc"] = startedAt.ToString("O");
     }
 });
 
