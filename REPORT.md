@@ -6,7 +6,7 @@ This project implements a small, standalone HTTP API (C# / ASP.NET) that queries
 
 Primary goal: provide a clean API surface and a query layer that can evolve without turning into one large controller method, while remaining safe (parameterized SQL) and reasonably efficient for time-bounded requests.
 
-This is a **medium-hard task** mainly due to PnL semantics, not due to HTTP or ClickHouse connectivity. The API must avoid confusing:
+This task difficulty mainly comes from PnL semantics, not due to HTTP or ClickHouse connectivity. The API must avoid confusing:
 
 ```text
 trade intent            ≠ token transfers
@@ -361,6 +361,88 @@ If this needs to scale to many concurrent queries for very active wallets:
 - Consider caching token prices and/or per-wallet token lists for hot wallets.
 - Consider moving to an async job model for long warmup queries.
 
+## Dataset exploration notes (Marimo)
+
+This section captures observations from exploratory work in Marimo against the live ClickHouse dataset. These are not contractual guarantees of the dataset; they are meant to guide query design and scaling decisions.
+
+### Database layout and privileges
+
+- The provided user had `SELECT` on `solanav1.*`. Queries that implicitly target `default.*` (e.g., `DESCRIBE TABLE ui_trades` without DB qualification) can fail.
+
+Practical consequences:
+
+- Prefer fully qualifying tables (`solanav1.ui_trades`, `solanav1.wallet_1m_deltas`, `solanav1.token_prices_1m`) or ensure the connection’s default database is `solanav1`.
+- Use `SELECT * LIMIT 1` / `system.columns` rather than relying on `DESCRIBE` against the wrong DB.
+
+### AggregateFunction state columns
+
+Two key tables use ClickHouse aggregate-state columns:
+
+- `wallet_1m_deltas.close_holdings` is an `AggregateFunction` state; read it via `argMaxMerge(close_holdings)` (end-of-range).
+- `token_prices_1m.close` is an `AggregateFunction(argMax, Float64, Int64)` state; to obtain a minute-level close, use `argMaxMerge(close)` grouped by `(mint, minute)`.
+
+“Latest price at or before `to`” is safer when implemented as:
+
+1) `(mint, minute) -> price := argMaxMerge(close)`
+2) per mint: `argMax(price, minute)` to pick the latest minute <= `to`
+
+### Coverage and volumes (snapshot)
+
+These numbers are approximate and time-dependent, but they are useful to reason about query cost:
+
+- `ui_trades`
+  - Coverage (min/max `block_time`): ~`2026-04-28` → `2026-05-25`
+  - Total rows: ~`590M` trade rows
+  - Last 24h: ~`47M` trade rows
+- `wallet_1m_deltas`
+  - Coverage (min/max `minute`): ~`2026-05-14` → `2026-05-25` (shorter than `ui_trades`)
+  - Total rows: ~`708M` rows
+  - Last 24h: ~`69M` rows
+- `token_prices_1m`
+  - Token id column is `mint` (not `token`)
+  - Filtering out sentinel timestamps (e.g., `minute >= '2024-01-01'`) produced a meaningful min coverage around ~`2026-04-17`
+  - Last 24h: ~`0.8M` rows
+
+Key implication: `wallet_1m_deltas` may not cover the entire `ui_trades` history. For older `from/to` ranges, `closeHoldings` can be missing or incomplete. The API should treat this as “best-effort” and rely on diagnostics rather than assuming holdings are always available.
+
+### Data quality signals
+
+In `ui_trades`, a small but non-zero number of rows had `price_usd = 0` and/or `volume_usd = 0` in a rolling 24h window. For USD-denominated PnL:
+
+- Keep diagnostics (`totalBuyUsd`, `totalSellUsd`, `latestPriceUsd`, and optionally “zero-price row count”) to avoid presenting PnL as absolute truth.
+- If desired, filter or de-weight zero-price rows for analytics, but be explicit because it changes semantics.
+
+### Heavy-tail behavior (scaling relevance)
+
+Activity is strongly heavy-tailed:
+
+- A small fraction of wallets accounts for a large fraction of trade rows.
+- “Super wallets” can have tens of thousands of trade rows/day.
+
+Implications for the API:
+
+- Worst-case latency is dominated by a small number of hot wallets.
+- Keep the **time-range cap** (e.g. 30 days) and a **hard cap** for warmup trades.
+- Consider caching:
+  - `token_prices_1m` latest prices (short TTL)
+  - token list per wallet for hot wallets (short TTL)
+- Consider an async job model for deep history requests if the product needs it.
+
+### Potential bottlenecks and optimizations
+
+Likely bottlenecks:
+
+- `Warmup` cost basis for extremely active wallets (trade-row volume).
+- Mark-price lookup if implemented as “scan all prices”; always restrict to `mint IN @tokens`.
+- Any query that is not selective by `user_wallet` and time.
+
+Optimizations that preserve semantics:
+
+- Always anchor all large scans by `(user_wallet, time)`; avoid unbounded queries in the API path.
+- Fetch token list first (`DISTINCT token`) and use it to constrain subsequent queries (prices, warmup).
+- Prefer table-specific aggregations in ClickHouse (small result sets) over moving raw rows to the app process.
+- Avoid `FINAL` unless you have explicit evidence it is required; it can be extremely expensive on large tables.
+
 ## CI/CD
 
 GitHub Actions performs:
@@ -376,3 +458,21 @@ Current Cloud Run URL:
 Docker Hub repository:
 
 - https://hub.docker.com/repository/docker/dysoncucumber/crypto/general
+
+## Optional features (not implemented)
+
+The original assignment suggested several optional extensions. This implementation intentionally keeps the API surface small and focuses on correct semantics and safe querying.
+
+Not implemented (yet):
+
+- `groupBy=hour|day` time series output (chartable PnL). The current endpoint returns one row per token for the whole range. A time series would require either (a) repeated cost-basis resets per bucket (not correct) or (b) carrying state across buckets (more complex) and would benefit from precomputed snapshots/materialized views.
+- `includeTransfers=true` as a functional switch. The parameter exists but is currently diagnostic-only. Modeling transfers correctly means defining an accounting policy for “unknown basis” inflows (airdrops, deposits, bridges) and deciding how they affect realized PnL on subsequent sells (treat basis as 0, treat as unknown, or track separate lots).
+- Multi-wallet support (comma-separated list). This is straightforward to add at the controller level, but it multiplies query volume and needs stricter request limits/rate limiting for production.
+- “Top movers / top coins” endpoints. Better as a separate endpoint backed by cached aggregates to avoid turning the core `/pnl` into a heavy analytics query.
+- Materialized view proposal/implementation. For production scale, snapshotting per-wallet/token cost basis state (hourly/daily) is recommended
+
+## Riddle (one-line answer)
+
+> “I am counted once and never change, yet my shadow changes whenever you ask. Hold me in tokens and I stay the same; price me in dollars and time answers back.”
+
+Maybe primarily impermanent loss. More likely it is a **token-denominated position** whose dollar “shadow” is the mark-to-market value. A related interpretation is unrealized PnL. It changes whenever you change the pricing timestamp, even if the token quantity has not changed.
