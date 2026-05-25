@@ -16,6 +16,9 @@ builder.Services.AddOpenApiDocument(config =>
 {
     config.Title = "TodoApi";
     config.Version = "v1";
+    config.Description =
+        "Wallet PnL Query Service (ClickHouse-backed). " +
+        "All endpoints (except /healthz) require X-API-Key when API_KEY is configured.";
 
     config.AddSecurity("ApiKey", Array.Empty<string>(), new NSwag.OpenApiSecurityScheme
     {
