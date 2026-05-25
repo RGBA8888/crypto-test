@@ -1,8 +1,8 @@
 using Microsoft.AspNetCore.HttpOverrides;
 using NSwag.Generation.Processors.Security;
-using TodoApi.Services.ClickHouse;
-using TodoApi.Data.Pnl;
-using TodoApi.Services.Pnl;
+using Crypto.Services.ClickHouse;
+using Crypto.Data.Pnl;
+using Crypto.Services.Pnl;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -14,7 +14,7 @@ builder.Services.AddSingleton<IPnlQueryRepository, PnlQueryRepository>();
 builder.Services.AddSingleton<IPnlService, PnlService>();
 builder.Services.AddOpenApiDocument(config =>
 {
-    config.Title = "TodoApi";
+    config.Title = "Crypto";
     config.Version = "v1";
     config.Description =
         "Wallet PnL Query Service (ClickHouse-backed). " +

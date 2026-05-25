@@ -1,4 +1,4 @@
-namespace TodoApi.Domain.Pnl;
+namespace Crypto.Domain.Pnl;
 
 public sealed class WeightedAverageCostState
 {
@@ -39,4 +39,3 @@ public sealed class WeightedAverageCostState
         }
     }
 }
-

@@ -8,7 +8,7 @@ on:
     branches: [ main ]
 
 env:
-  SERVICE_NAME: todoapi
+  SERVICE_NAME: crypto
 
 jobs:
   deploy:
@@ -42,5 +42,5 @@ jobs:
           --region "${{ secrets.GCP_REGION }}"
           --platform managed
           --allow-unauthenticated
-          --image "docker.io/${{ secrets.DOCKERHUB_USERNAME }}/todoapi:${{ steps.tag.outputs.tag }}"
+          --image "docker.io/${{ secrets.DOCKERHUB_USERNAME }}/crypto:${{ steps.tag.outputs.tag }}"
           --set-env-vars "ASPNETCORE_ENVIRONMENT=Production,SWAGGER_ENABLED=${{ vars.SWAGGER_ENABLED || 'false' }},API_KEY=${{ secrets.API_KEY }},CLICKHOUSE_PROTOCOL=${{ vars.CLICKHOUSE_PROTOCOL || 'http' }},CLICKHOUSE_HOST=${{ vars.CLICKHOUSE_HOST }},CLICKHOUSE_PORT=${{ vars.CLICKHOUSE_PORT || '8123' }},CLICKHOUSE_DATABASE=${{ vars.CLICKHOUSE_DATABASE || '__default__' }},CLICKHOUSE_USER=${{ vars.CLICKHOUSE_USER }},CLICKHOUSE_TIMEOUT_SECONDS=${{ vars.CLICKHOUSE_TIMEOUT_SECONDS || '10' }},CLICKHOUSE_PASSWORD=${{ secrets.CLICKHOUSE_PASSWORD }}"

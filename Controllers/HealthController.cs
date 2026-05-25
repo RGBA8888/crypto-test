@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 
-namespace TodoApi.Controllers;
+namespace Crypto.Controllers;
 
 [ApiController]
 public class HealthController : ControllerBase

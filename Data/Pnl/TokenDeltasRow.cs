@@ -1,4 +1,4 @@
-namespace TodoApi.Data.Pnl;
+namespace Crypto.Data.Pnl;
 
 public sealed class TokenDeltasRow
 {

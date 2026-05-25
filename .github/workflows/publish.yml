@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 env:
-  IMAGE_NAME: todoapi
+  IMAGE_NAME: crypto
 
 jobs:
   dockerhub:

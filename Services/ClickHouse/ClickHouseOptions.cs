@@ -1,4 +1,4 @@
-namespace TodoApi.Services.ClickHouse;
+namespace Crypto.Services.ClickHouse;
 
 public sealed record ClickHouseOptions
 {

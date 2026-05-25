@@ -1,9 +1,9 @@
 using Microsoft.AspNetCore.Mvc;
-using TodoApi.Contracts.Pnl;
-using TodoApi.Domain.Pnl;
-using TodoApi.Services.Pnl;
+using Crypto.Contracts.Pnl;
+using Crypto.Domain.Pnl;
+using Crypto.Services.Pnl;
 
-namespace TodoApi.Controllers;
+namespace Crypto.Controllers;
 
 [ApiController]
 [Route("wallets")]

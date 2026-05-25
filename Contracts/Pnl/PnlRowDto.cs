@@ -1,4 +1,4 @@
-namespace TodoApi.Contracts.Pnl;
+namespace Crypto.Contracts.Pnl;
 
 public sealed record PnlRowDto(
     string Token,
@@ -11,4 +11,3 @@ public sealed record PnlRowDto(
     decimal? LatestPriceUsd,
     long TradeCount,
     PnlDiagnosticsDto Diagnostics);
-

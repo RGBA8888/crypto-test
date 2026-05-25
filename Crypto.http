@@ -1,0 +1,6 @@
+@Crypto_HostAddress = http://localhost:5064
+
+GET {{Crypto_HostAddress}}/healthz/
+Accept: application/json
+
+###

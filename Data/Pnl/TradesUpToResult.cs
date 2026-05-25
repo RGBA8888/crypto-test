@@ -1,7 +1,6 @@
-namespace TodoApi.Data.Pnl;
+namespace Crypto.Data.Pnl;
 
 public sealed record TradesUpToResult(
     IReadOnlyList<TradeRow> Trades,
     bool IsTruncated,
     int Limit);
-

@@ -1,4 +1,4 @@
-namespace TodoApi.Services.Pnl;
+namespace Crypto.Services.Pnl;
 
 public static class UtcTimestampParser
 {

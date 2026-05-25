@@ -1,4 +1,4 @@
-namespace TodoApi.Domain.Pnl;
+namespace Crypto.Domain.Pnl;
 
 /// <summary>
 /// Controls how cost basis is computed for realized/unrealized PnL.

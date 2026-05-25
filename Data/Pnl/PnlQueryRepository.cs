@@ -1,9 +1,9 @@
 using System.Data;
 using ClickHouse.Driver.ADO;
 using Dapper;
-using TodoApi.Services.ClickHouse;
+using Crypto.Services.ClickHouse;
 
-namespace TodoApi.Data.Pnl;
+namespace Crypto.Data.Pnl;
 
 public sealed class PnlQueryRepository(IConfiguration configuration) : IPnlQueryRepository
 {

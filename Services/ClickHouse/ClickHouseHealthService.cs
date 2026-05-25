@@ -1,7 +1,7 @@
 using System.Data;
 using ClickHouse.Driver.ADO;
 
-namespace TodoApi.Services.ClickHouse;
+namespace Crypto.Services.ClickHouse;
 
 public interface IClickHouseHealthService
 {

@@ -1,4 +1,4 @@
-namespace TodoApi.Contracts.Pnl;
+namespace Crypto.Contracts.Pnl;
 
 public sealed record PnlDiagnosticsDto(
     decimal BuyAmount,

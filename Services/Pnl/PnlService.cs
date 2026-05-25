@@ -1,8 +1,8 @@
-using TodoApi.Contracts.Pnl;
-using TodoApi.Data.Pnl;
-using TodoApi.Domain.Pnl;
+using Crypto.Contracts.Pnl;
+using Crypto.Data.Pnl;
+using Crypto.Domain.Pnl;
 
-namespace TodoApi.Services.Pnl;
+namespace Crypto.Services.Pnl;
 
 public sealed class PnlService(IPnlQueryRepository repository, ILogger<PnlService> logger) : IPnlService
 {

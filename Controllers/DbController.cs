@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
-using TodoApi.Services.ClickHouse;
+using Crypto.Services.ClickHouse;
 
-namespace TodoApi.Controllers;
+namespace Crypto.Controllers;
 
 [ApiController]
 [Route("api/db")]
@@ -14,4 +14,3 @@ public class DbController(IClickHouseHealthService clickHouseHealthService) : Co
         return result.Ok ? Ok(result) : StatusCode(StatusCodes.Status503ServiceUnavailable, result);
     }
 }
-

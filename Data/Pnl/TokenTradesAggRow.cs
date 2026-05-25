@@ -1,4 +1,4 @@
-namespace TodoApi.Data.Pnl;
+namespace Crypto.Data.Pnl;
 
 // NOTE: ClickHouse aggregates are typically returned as UInt64/Double by the driver.
 // Use a mutable POCO so Dapper can materialize without requiring an exact constructor match.
